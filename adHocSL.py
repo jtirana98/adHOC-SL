@@ -21,17 +21,17 @@ class define_training_param:
     num_out = 10
 
 class DataOwner:
-    def __init__(self, id, model_a, model_b, model_c, training_par):
+    def __init__(self, id, model_part_a, model_part_b, model_part_c, training_par):
         self.id = id
-        self.model_a = model_a
-        self.model_b = model_b
-        self.model_c = model_c
+        self.model_part_a = model_part_a
+        self.model_part_b = model_part_b
+        self.model_part_c = model_part_c
         self.training_par = training_par
 
         # define a different optimizer for each model part
-        self.optimizer_a = Adam(self.model_a.parameters(), lr=training_par.lr)  # NOTE: adapt accordingly
-        self.optimizer_b = Adam(self.model_b.parameters(), lr=training_par.lr)
-        self.optimizer_c = Adam(self.model_c.parameters(), lr=training_par.lr)
+        self.optimizer_a = Adam(self.model_part_a.parameters(), lr=training_par.lr)  # NOTE: adapt accordingly
+        self.optimizer_b = Adam(self.model_part_b.parameters(), lr=training_par.lr)
+        self.optimizer_c = Adam(self.model_part_c.parameters(), lr=training_par.lr)
 
         self.criterion = nn.CrossEntropyLoss()                                  # NOTE: adapt accordingly
 
@@ -44,21 +44,21 @@ class AdHocSL:
         self.pointb = pointb
         self.training_par = define_training_param()
 
-        g_model_a = my_resnet.get_resnet18(self.training_par.num_out, -1, self.pointa)
-        g_model_b = my_resnet.get_resnet18(self.training_par.num_out, self.pointa, self.pointb)
-        g_model_c = my_resnet.get_resnet18(self.training_par.num_out, self.pointb, -1)
+        g_model_part_a = my_resnet.get_resnet18(self.training_par.num_out, -1, self.pointa)
+        g_model_part_b = my_resnet.get_resnet18(self.training_par.num_out, self.pointa, self.pointb)
+        g_model_part_c = my_resnet.get_resnet18(self.training_par.num_out, self.pointb, -1)
         
 
         for i in range(num_dataowners):
-            model_a = my_resnet.get_resnet18(self.training_par.num_out, -1, self.pointa)
-            model_b = my_resnet.get_resnet18(self.training_par.num_out, self.pointa, self.pointb)
-            model_c = my_resnet.get_resnet18(self.training_par.num_out, self.pointb, -1)
+            model_part_a = my_resnet.get_resnet18(self.training_par.num_out, -1, self.pointa)
+            model_part_b = my_resnet.get_resnet18(self.training_par.num_out, self.pointa, self.pointb)
+            model_part_c = my_resnet.get_resnet18(self.training_par.num_out, self.pointb, -1)
             
-            model_a.load_state_dict(copy.deepcopy(g_model_a.state_dict()))
-            model_b.load_state_dict(copy.deepcopy(g_model_b.state_dict()))
-            model_c.load_state_dict(copy.deepcopy(g_model_c.state_dict()))
+            model_part_a.load_state_dict(copy.deepcopy(g_model_part_a.state_dict()))
+            model_part_b.load_state_dict(copy.deepcopy(g_model_part_b.state_dict()))
+            model_part_c.load_state_dict(copy.deepcopy(g_model_part_c.state_dict()))
             
-            self.data_owners.append(DataOwner(i, model_a, model_b, model_c, self.training_par))
+            self.data_owners.append(DataOwner(i, model_part_a, model_part_b, model_part_c, self.training_par))
 
 
 
@@ -70,14 +70,14 @@ class AdHocSL:
 
         # start forward propagation
 
-        out_a = self.data_owners[d_id-1].model_a(input)
+        out_a = self.data_owners[d_id-1].model_part_a(input)
         det_out_a = out_a.clone().detach().requires_grad_(True)
 
 
-        out_b = self.data_owners[d_id-1].model_b(det_out_a)
+        out_b = self.data_owners[d_id-1].model_part_b(det_out_a)
         det_out_b = out_b.clone().detach().requires_grad_(True)
 
-        out_c = self.data_owners[d_id-1].model_c(det_out_b)
+        out_c = self.data_owners[d_id-1].model_part_c(det_out_b)
         loss = self.data_owners[d_id-1].criterion(out_c, label)  # calculates cross-entropy loss
         
         # start backward propagation
@@ -112,14 +112,17 @@ class AdHocSL:
 
         # start forward propagation
 
-        out_a = self.data_owners[source_id-1].model_a(input)
+        out_a = self.data_owners[source_id-1].model_part_a(input)
         det_out_a = out_a.clone().detach().requires_grad_(True)
 
+        # TRANSFER
 
-        out_b = self.data_owners[destination_id-1].model_b(det_out_a)
+        out_b = self.data_owners[destination_id-1].model_part_b(det_out_a)
         det_out_b = out_b.clone().detach().requires_grad_(True)
 
-        out_c = self.data_owners[source_id-1].model_c(det_out_b)
+        # TRANSFER
+
+        out_c = self.data_owners[source_id-1].model_part_c(det_out_b)
         
         loss = self.data_owners[source_id-1].criterion(out_c, label)  # calculates cross-entropy loss
         
@@ -134,10 +137,17 @@ class AdHocSL:
         self.data_owners[source_id-1].optimizer_c.step()
 
         grad_b = det_out_b.grad.clone().detach()
+
+        # TRANSFER
+
         out_b.backward(grad_b)
         self.data_owners[destination_id-1].optimizer_b.step()
 
         grad_a = det_out_a.grad.clone().detach()
+
+        # TRANSFER
+
+
         out_a.backward(grad_a)
         self.data_owners[source_id-1].optimizer_a.step()
 
