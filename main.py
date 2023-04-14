@@ -26,20 +26,22 @@ def main():
     classes = ('plane', 'car', 'bird', 'cat',
            'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
-
     for epoch in range(sys_.training_par.epoch_num):
         train_iterator = iter(trainloader)
         #print(len(train_iterator))
         epoch_loss = 0
         epoch_acc = 0
 
+        
+        
         for batch in train_iterator:
             images, labels = batch
             (loss, acc) = sys_.local_update( 1, images, labels)
             print(f'{loss} {acc}')
             (loss, acc) = sys_.adHoc_update( 1, 2, images, labels)
             print(f'{loss} {acc}')
-
+        
+    sys_.aggregate()
 
 if __name__ == '__main__':
     main()

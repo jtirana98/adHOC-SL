@@ -21,6 +21,8 @@ class define_training_param:
     num_out = 10
 
 class DataOwner:
+    num_of_samples = 1
+
     def __init__(self, id, model_part_a, model_part_b, model_part_c, training_par):
         self.id = id
         self.model_part_a = model_part_a
@@ -36,6 +38,7 @@ class DataOwner:
         self.criterion = nn.CrossEntropyLoss()                                  # NOTE: adapt accordingly
 
 
+
 class AdHocSL:
     data_owners = []
 
@@ -44,9 +47,9 @@ class AdHocSL:
         self.pointb = pointb
         self.training_par = define_training_param()
 
-        g_model_part_a = my_resnet.get_resnet18(self.training_par.num_out, -1, self.pointa)
-        g_model_part_b = my_resnet.get_resnet18(self.training_par.num_out, self.pointa, self.pointb)
-        g_model_part_c = my_resnet.get_resnet18(self.training_par.num_out, self.pointb, -1)
+        self.g_model_part_a = my_resnet.get_resnet18(self.training_par.num_out, -1, self.pointa)
+        self.g_model_part_b = my_resnet.get_resnet18(self.training_par.num_out, self.pointa, self.pointb)
+        self.g_model_part_c = my_resnet.get_resnet18(self.training_par.num_out, self.pointb, -1)
         
 
         for i in range(num_dataowners):
@@ -54,13 +57,11 @@ class AdHocSL:
             model_part_b = my_resnet.get_resnet18(self.training_par.num_out, self.pointa, self.pointb)
             model_part_c = my_resnet.get_resnet18(self.training_par.num_out, self.pointb, -1)
             
-            model_part_a.load_state_dict(copy.deepcopy(g_model_part_a.state_dict()))
-            model_part_b.load_state_dict(copy.deepcopy(g_model_part_b.state_dict()))
-            model_part_c.load_state_dict(copy.deepcopy(g_model_part_c.state_dict()))
+            model_part_a.load_state_dict(copy.deepcopy(self.g_model_part_a.state_dict()))
+            model_part_b.load_state_dict(copy.deepcopy(self.g_model_part_b.state_dict()))
+            model_part_c.load_state_dict(copy.deepcopy(self.g_model_part_c.state_dict()))
             
             self.data_owners.append(DataOwner(i, model_part_a, model_part_b, model_part_c, self.training_par))
-
-
 
 
     def local_update(self, d_id, input, label):
@@ -152,3 +153,53 @@ class AdHocSL:
         self.data_owners[source_id-1].optimizer_a.step()
 
         return (loss, acc)
+
+    def aggregate(self):
+        total_samples = 0
+        for i in range(len(self.data_owners)):
+            print(i)
+            total_samples += self.data_owners[i].num_of_samples
+            if i == 0: # just copy
+                k = 0
+                for key in self.g_model_part_a.state_dict().keys():
+                    self.g_model_part_a.state_dict()[key] = self.data_owners[i].model_part_a.state_dict()[key].clone()
+                    self.g_model_part_a.state_dict()[key] = torch.multiply(self.g_model_part_a.state_dict()[key], self.data_owners[i].num_of_samples)
+                    
+                    if (i == len(self.data_owners) - 1):
+                        self.g_model_part_a.state_dict()[key] = torch.divide(self.g_model_part_a.state_dict()[key], total_samples)
+
+                for key in self.g_model_part_b.state_dict().keys():
+                    self.g_model_part_b.state_dict()[key] = self.data_owners[i].model_part_b.state_dict()[key].clone()
+                    self.g_model_part_b.state_dict()[key] = torch.multiply(self.g_model_part_b.state_dict()[key], self.data_owners[i].num_of_samples)
+
+                    if (i == len(self.data_owners) - 1):
+                        self.g_model_part_b.state_dict()[key] = torch.divide(self.g_model_part_b.state_dict()[key], total_samples)
+
+                for key in self.g_model_part_c.state_dict().keys():
+                    self.g_model_part_c.state_dict()[key] = self.data_owners[i].model_part_c.state_dict()[key].clone()
+                    self.g_model_part_c.state_dict()[key] = torch.multiply(self.g_model_part_c.state_dict()[key], self.data_owners[i].num_of_samples)
+
+                    if (i == len(self.data_owners) - 1):
+                        self.g_model_part_c.state_dict()[key] = torch.divide(self.g_model_part_c.state_dict()[key], total_samples)
+            else:
+                for key in self.g_model_part_a.state_dict().keys():
+
+                    self.g_model_part_a.state_dict()[key] += self.data_owners[i].model_part_a.state_dict()[key].clone()
+                    self.g_model_part_a.state_dict()[key] = torch.multiply(self.g_model_part_a.state_dict()[key], self.data_owners[i].num_of_samples)
+
+                    if (i == len(self.data_owners) - 1):
+                        self.g_model_part_a.state_dict()[key] = torch.divide(self.g_model_part_a.state_dict()[key], total_samples)
+                
+                for key in self.g_model_part_b.state_dict().keys():
+                    self.g_model_part_b.state_dict()[key] += self.data_owners[i].model_part_b.state_dict()[key].clone()
+                    self.g_model_part_b.state_dict()[key] = torch.multiply(self.g_model_part_b.state_dict()[key], self.data_owners[i].num_of_samples)
+
+                    if (i == len(self.data_owners) - 1):
+                        self.g_model_part_b.state_dict()[key] = torch.divide(self.g_model_part_b.state_dict()[key], total_samples)
+
+                for key in self.g_model_part_c.state_dict().keys():
+                    self.g_model_part_c.state_dict()[key] += self.data_owners[i].model_part_c.state_dict()[key].clone()
+                    self.g_model_part_c.state_dict()[key] = torch.multiply(self.g_model_part_c.state_dict()[key], self.data_owners[i].num_of_samples)
+
+                    if (i == len(self.data_owners) - 1):
+                        self.g_model_part_c.state_dict()[key] = torch.divide(self.g_model_part_c.state_dict()[key], total_samples)
